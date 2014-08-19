@@ -8,7 +8,28 @@ from django.contrib.auth.models import User
 import provider.oauth2.forms
 import provider.constants
 from provider.forms import OAuthValidationError
+from provider.oauth2.forms import ScopeChoiceField
 from provider.oauth2.models import Client
+
+from oauth2_provider.constants import SCOPE_NAMES
+
+
+# TODO
+
+class AuthorizationRequestForm(provider.oauth2.forms.AuthorizationRequestForm):
+    scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
+
+
+class AuthorizationForm(provider.oauth2.forms.AuthorizationForm):
+    scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
+
+
+class RefreshTokenGrantForm(provider.oauth2.forms.RefreshTokenGrantForm):
+    scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
+
+
+class AuthorizationCodeGrantForm(provider.oauth2.forms.AuthorizationCodeGrantForm):
+    scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
 
 
 # The forms in this module are required to use email as a secondary

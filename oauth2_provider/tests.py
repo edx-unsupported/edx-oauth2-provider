@@ -13,15 +13,12 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from django.contrib.auth.models import User
 
-import oauth2_provider.constants
-
 import provider.oauth2.models
 import provider.oauth2.views
 from provider.constants import PUBLIC, CONFIDENTIAL
 from factory.django import DjangoModelFactory
 from factory import PostGenerationMethodCall
 from ddt import ddt, data
-
 
 import oauth2_provider.views
 import oauth2_provider.models

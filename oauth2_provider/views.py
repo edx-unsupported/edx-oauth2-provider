@@ -8,6 +8,7 @@ from provider.oauth2.views import OAuthError
 from provider.oauth2.views import Capture, Redirect  # pylint: disable=unused-import
 
 import oauth2_provider.constants as constants
+from oauth2_provider.forms import AuthorizationRequestForm, AuthorizationForm, RefreshTokenGrantForm, AuthorizationCodeGrantForm
 from oauth2_provider.forms import PasswordGrantForm
 from oauth2_provider.models import TrustedClient
 from oauth2_provider.backends import PublicPasswordBackend
@@ -19,6 +20,9 @@ class Authorize(provider.oauth2.views.Authorize):
     edX customized authorization view:
       - Introduces trusted clients, which do not require user consent.
     """
+    def get_request_form(self, client, data):
+        return AuthorizationRequestForm(data, client=client)
+
     def get_authorization_form(self, request, client, data, client_data):
         # Check if the client is trusted. If so, bypass user
         # authorization by filling the data in the form.
@@ -27,7 +31,7 @@ class Authorize(provider.oauth2.views.Authorize):
             scope_names = scope.to_names(client_data['scope'])
             data = {'authorize': [u'Authorize'], 'scope': scope_names}
 
-        form = provider.oauth2.forms.AuthorizationForm(data)
+        form = AuthorizationForm(data)
         return form
 
 
@@ -43,6 +47,18 @@ class AccessTokenView(provider.oauth2.views.AccessTokenView):
     # add custom authentication provider
     authentication = (provider.oauth2.views.AccessTokenView.authentication +
                       (PublicPasswordBackend, ))
+
+    def get_authorization_code_grant(self, request, data, client):
+        form = AuthorizationCodeGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        return form.cleaned_data.get('grant')
+
+    def get_refresh_token_grant(self, request, data, client):
+        form = RefreshTokenGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        return form.cleaned_data.get('refresh_token')
 
     def get_password_grant(self, _request, data, client):
         # Use customized form to allow use of user email during authentication
