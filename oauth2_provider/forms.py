@@ -14,7 +14,9 @@ from provider.oauth2.models import Client
 from oauth2_provider.constants import SCOPE_NAMES
 
 
-# TODO
+# The following forms override the scope field to use the SCOPE_NAMES
+# defined for this provider. Otherwise it will use the default values from
+# the django-oauth2-provider package.
 
 class AuthorizationRequestForm(provider.oauth2.forms.AuthorizationRequestForm):
     scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
