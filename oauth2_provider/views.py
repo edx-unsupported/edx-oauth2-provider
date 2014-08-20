@@ -6,12 +6,14 @@ import provider.oauth2.forms
 from provider import scope
 from provider.oauth2.views import OAuthError
 from provider.oauth2.views import Capture, Redirect  # pylint: disable=unused-import
+from django.conf import settings
 
 import oauth2_provider.constants as constants
 from oauth2_provider.forms import AuthorizationRequestForm, AuthorizationForm, RefreshTokenGrantForm, AuthorizationCodeGrantForm
 from oauth2_provider.forms import PasswordGrantForm
 from oauth2_provider.models import TrustedClient
 from oauth2_provider.backends import PublicPasswordBackend
+from oauth2_provider.utils import import_string
 
 
 # pylint: disable=abstract-method
@@ -71,8 +73,20 @@ class AccessTokenView(provider.oauth2.views.AccessTokenView):
     def access_token_response_data(self, access_token):
         # Include username along the access token response if requested in the scope.
         response_data = super(AccessTokenView, self).access_token_response_data(access_token)
+        user = access_token.user
 
         if scope.check(constants.USERNAME_SCOPE, access_token.scope):
-            response_data.update({'preferred_username': access_token.user.username})
+            response_data.update({'preferred_username': user.username})
+
+        handler = getattr(settings, 'OAUTH2_ADDITIONAL_DATA_HANDLER', None)
+
+        if handler:
+            handler = import_string(handler)
+            handler_data = handler(user)
+
+            # Do not allow handlers to overwrite the default information (e.g. access_token).
+            handler_data.update(response_data)
+            response_data = handler_data
+
 
         return response_data
