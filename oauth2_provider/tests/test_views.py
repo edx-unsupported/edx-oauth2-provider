@@ -9,7 +9,7 @@ from ddt import ddt, data
 
 from provider.constants import PUBLIC, CONFIDENTIAL
 from provider.oauth2.tests import BaseOAuth2TestCase
-from oauth2_provider.factories import UserFactory, ClientFactory, CLIENT_REDIRECT_URI, TrustedClientFactory
+from oauth2_provider.tests.factories import UserFactory, ClientFactory, TrustedClientFactory
 from oauth2_provider.tests.utils import HANDLER_DATA
 
 
@@ -161,11 +161,12 @@ class ClientBaseTest(TestCase):
             client_secret=CLIENT_SECRET,
             client_type=CONFIDENTIAL
         )
+
         self.payload = {
             'client_id': CLIENT_ID,
             'response_type': 'code',
             'state': 'some_state',
-            'redirect_uri': CLIENT_REDIRECT_URI
+            'redirect_uri': ClientFactory.redirect_uri
         }
 
     def set_scope(self, scope):
