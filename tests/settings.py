@@ -69,3 +69,5 @@ INSTALLED_APPS = (
     'provider.oauth2',
     'oauth2_provider',
 )
+
+OAUTH_OIDC_ISSUER = 'https://example.test/oauth2'

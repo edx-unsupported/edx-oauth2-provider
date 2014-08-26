@@ -1,12 +1,13 @@
 """
-Custom OAuth2 modes
+Custom OAuth2 models
+
 """
 
 from django.db import models
 
 from provider.oauth2.models import Client
 
-import oauth2_provider.constants
+import oauth2_provider.constants  # pylint: disable=unused-import
 
 
 class TrustedClient(models.Model):
