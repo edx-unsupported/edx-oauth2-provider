@@ -23,6 +23,8 @@ setup(
         'http://github.com/edx/django-oauth2-provider/tarball/0250c1c0fa#egg=django-oauth2-provider',
     ],
     install_requires=[
-        'django-oauth2-provider'
+        'django-oauth2-provider',
+        'shortuuid==0.3',
+        'PyJWT==0.2.1'
     ]
 )

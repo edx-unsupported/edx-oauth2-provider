@@ -1,3 +1,5 @@
+# pylint: disable=missing-docstring
+
 import json
 import os.path
 import urlparse
@@ -229,3 +231,8 @@ class ClientScopeTest(ClientBaseTest):
         values = json.loads(response.content)
         self.assertNotIn('preferred_username', values)
         self.assertNotIn('preferred_username', values.get('scope'))
+
+
+class OIDCScopeTest(ClientBaseTest):
+    # TODO add tests with proper request using openid/profile scopes
+    pass
