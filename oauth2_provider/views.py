@@ -4,22 +4,27 @@ Customized django-oauth2-provider views, aligned with the OpenID specification.
 """
 import json
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.views.generic import View
-
-import provider.oauth2.views
 import provider.oauth2.forms
-import provider.scope
 from provider.oauth2.models import AccessToken
+import provider.oauth2.views
 from provider.oauth2.views import OAuthError, Capture, Redirect  # pylint: disable=unused-import
+import provider.scope
 
 import oauth2_provider.oidc as oidc
 from oauth2_provider import constants
-from oauth2_provider.forms import PasswordGrantForm
+from oauth2_provider.backends import PublicPasswordBackend, ExistingSessionBackend
+from oauth2_provider.forms import (
+    AuthorizationRequestForm,
+    AuthorizationForm,
+    RefreshTokenGrantForm,
+    AuthorizationCodeGrantForm,
+    EdxSessionGrantForm,
+    PasswordGrantForm,
+)
 from oauth2_provider.models import TrustedClient
-from oauth2_provider.backends import PublicPasswordBackend
-from oauth2_provider.forms import (AuthorizationRequestForm, AuthorizationForm,
-                                   RefreshTokenGrantForm, AuthorizationCodeGrantForm)
 
 
 # pylint: disable=abstract-method
@@ -58,10 +63,43 @@ class AccessTokenView(provider.oauth2.views.AccessTokenView):
     and available to the claim handlers configured by `OAUTH_OIDC_ID_TOKEN_HANDLERS`
 
     """
+    grant_types = provider.oauth2.views.AccessTokenView.grant_types + ["edx_session"]
 
     # Add custom authentication provider, to support email as username.
     authentication = (provider.oauth2.views.AccessTokenView.authentication +
-                      (PublicPasswordBackend, ))
+                      (PublicPasswordBackend, ExistingSessionBackend))
+
+    def edx_session(self, request, data, client):
+        """
+        Handle ``grant_type=edx_session`` requests.
+        """
+        grant_data = self.get_edx_session_grant(request, request.POST, client)
+        at = self.create_access_token(request, grant_data['user'], grant_data['scope'], client)
+        return self.access_token_response(at)
+
+    def get_edx_session_grant(self, request, data, client):
+        """
+        Pull user object based on the current login session (if there is one).
+        Add parameters from the POST request.
+        """
+        if not (request.user.is_authenticated() and getattr(settings, 'OAUTH2_ALLOW_EDX_SESSION_GRANT', False)):
+            raise OAuthError({'error': 'invalid_grant'})
+        form = EdxSessionGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        grant_data = form.cleaned_data
+        grant_data['user'] = request.user
+        return grant_data
+
+    def get_handler(self, grant_type):
+        """
+        Add extension grant 'edx_session' to the list of grants covered by
+        `provider.views.AccessToken`
+        """
+        handler = super(AccessTokenView, self).get_handler(grant_type)
+        if handler is None and grant_type == 'edx_session':
+            handler = self.edx_session
+        return handler
 
     # The following grant overrides make sure the view uses our customized forms.
 

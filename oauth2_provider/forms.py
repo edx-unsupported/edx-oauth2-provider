@@ -5,6 +5,7 @@ OAuth2 provider customized `django-oauth2-provider` forms.
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.forms import CharField
 
 import provider.oauth2.forms
 import provider.constants
@@ -94,15 +95,12 @@ class PasswordGrantForm(provider.oauth2.forms.PasswordGrantForm):
         return data
 
 
-class PublicPasswordGrantForm(PasswordGrantForm,
-                              provider.oauth2.forms.PublicPasswordGrantForm):
+class PublicClientIdMixin(object):
     """
-    Form wrapper to ensure the the customized PasswordGrantForm is used
-    during client authentication.
-
+    Form mixin to retrieve (public) Client objects based on the client_id parameter.
     """
     def clean(self):
-        data = super(PublicPasswordGrantForm, self).clean()
+        data = super(PublicClientIdMixin, self).clean()
 
         try:
             client = Client.objects.get(client_id=data.get('client_id'))
@@ -114,3 +112,19 @@ class PublicPasswordGrantForm(PasswordGrantForm,
 
         data['client'] = client
         return data
+
+
+class PublicPasswordGrantForm(PublicClientIdMixin, PasswordGrantForm, provider.oauth2.forms.PublicPasswordGrantForm):
+    """
+    Form wrapper to ensure the the customized PasswordGrantForm is used
+    during client authentication.
+    """
+    pass
+
+
+class EdxSessionGrantForm(PublicClientIdMixin, provider.oauth2.forms.ScopeMixin, provider.oauth2.forms.OAuthForm):
+    """
+    Form wrapper checking client_id and scope fields for use with the edx_session grant type.
+    """
+    client_id = CharField(required=True)
+    scope = ScopeChoiceField(choices=SCOPE_NAMES, required=False)
