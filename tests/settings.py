@@ -93,3 +93,5 @@ OAUTH_OIDC_USERINFO_HANDLERS = (
     'oauth2_provider.oidc.handlers.EmailHandler',
     'oauth2_provider.tests.handlers.TestHandler'
 )
+
+OAUTH_RESPONSE_TYPE_CHOICES = ('code', 'token', 'id_token')

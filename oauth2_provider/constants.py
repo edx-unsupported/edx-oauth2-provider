@@ -41,6 +41,10 @@ SCOPE_NAMES = [(name, name) for (value, name) in SCOPES]
 SCOPE_NAME_DICT = dict([(name, value) for (value, name) in SCOPES])
 SCOPE_VALUE_DICT = dict([(value, name) for (value, name) in SCOPES])
 
+# since this package explicitly supports the 'id_token' response type, override
+# the base package's default.
+DEFAULT_RESPONSE_TYPE_CHOICES = ('code', 'token', 'id_token')
+RESPONSE_TYPE_CHOICES = getattr(settings, 'OAUTH_RESPONSE_TYPE_CHOICES', DEFAULT_RESPONSE_TYPE_CHOICES)
 
 # OpenID Connect claim handlers
 
@@ -74,6 +78,7 @@ USERINFO_HANDLERS = getattr(settings, 'OAUTH_OIDC_USERINFO_HANDLERS', DEFAULT_US
 
 provider.constants.SCOPES = SCOPES
 provider.constants.DEFAULT_SCOPES = SCOPES
+provider.constants.RESPONSE_TYPE_CHOICES = RESPONSE_TYPE_CHOICES
 
 provider.scope.SCOPES = SCOPES
 provider.scope.SCOPE_NAMES = SCOPE_NAMES

@@ -7,11 +7,10 @@ import json
 from django.http import HttpResponse
 from django.views.generic import View
 
-import provider.oauth2.views
-import provider.oauth2.forms
-import provider.scope
 from provider.oauth2.models import AccessToken
-from provider.oauth2.views import OAuthError, Capture, Redirect  # pylint: disable=unused-import
+from provider.oauth2.views import AccessTokenView, Authorize, OAuthError, OAuth2AccessTokenMixin
+from provider.oauth2.views import Capture, Redirect  # pylint: disable=unused-import
+import provider.scope
 
 import oauth2_provider.oidc as oidc
 from oauth2_provider import constants
@@ -22,79 +21,15 @@ from oauth2_provider.forms import (AuthorizationRequestForm, AuthorizationForm,
                                    RefreshTokenGrantForm, AuthorizationCodeGrantForm)
 
 
-# pylint: disable=abstract-method
-class Authorize(provider.oauth2.views.Authorize):
-    """
-    edX customized authorization view:
-      - Introduces trusted clients, which do not require user consent.
-    """
-    def get_request_form(self, client, data):
-        return AuthorizationRequestForm(data, client=client)
-
-    def get_authorization_form(self, _request, client, data, client_data):
-        # Check if the client is trusted. If so, bypass user
-        # authorization by filling the data in the form.
-        trusted = TrustedClient.objects.filter(client=client).exists()
-        if trusted:
-            scope_names = provider.scope.to_names(client_data['scope'])
-            data = {'authorize': [u'Authorize'], 'scope': scope_names}
-
-        form = AuthorizationForm(data)
-        return form
-
-
-# pylint: disable=abstract-method
-class AccessTokenView(provider.oauth2.views.AccessTokenView):
-    """
-    Customized OAuth2 access token view.
-
-    Allows usage of email as main identifier when requesting a password grant.
-
-    Support the ID Token endpoint following the OpenID Connect specification:
-
-    - http://openid.net/specs/openid-connect-core-1_0.html#TokenEndpoint
-
-    By default it returns all the claims available to the scope requested,
-    and available to the claim handlers configured by `OAUTH_OIDC_ID_TOKEN_HANDLERS`
-
-    """
-
-    # Add custom authentication provider, to support email as username.
-    authentication = (provider.oauth2.views.AccessTokenView.authentication +
-                      (PublicPasswordBackend, ))
-
-    # The following grant overrides make sure the view uses our customized forms.
-
-    # pylint: disable=no-member
-    def get_authorization_code_grant(self, _request, data, client):
-        form = AuthorizationCodeGrantForm(data, client=client)
-        if not form.is_valid():
-            raise OAuthError(form.errors)
-        return form.cleaned_data.get('grant')
-
-    # pylint: disable=no-member
-    def get_refresh_token_grant(self, _request, data, client):
-        form = RefreshTokenGrantForm(data, client=client)
-        if not form.is_valid():
-            raise OAuthError(form.errors)
-        return form.cleaned_data.get('refresh_token')
-
-    # pylint: disable=no-member
-    def get_password_grant(self, _request, data, client):
-        # Use customized form to allow use of user email during authentication.
-        form = PasswordGrantForm(data, client=client)
-        if not form.is_valid():
-            raise OAuthError(form.errors)
-        return form.cleaned_data
+class OIDCTokenMixin(OAuth2AccessTokenMixin):
 
     # pylint: disable=super-on-old-class
-    def access_token_response_data(self, access_token):
+    def access_token_response_data(self, access_token, response_type=None):
         """
         Return `access_token` fields for OAuth2, and add `id_token` fields for
         OpenID Connect according to the `access_token` scope.
 
         """
-
         # Clear the scope for requests that do not use OpenID Connect.
         # Scopes for pure OAuth2 request are currently not supported.
         scope = constants.DEFAULT_SCOPE
@@ -103,24 +38,50 @@ class AccessTokenView(provider.oauth2.views.AccessTokenView):
 
         # Add OpenID Connect `id_token` if requested.
         #
-        # TODO: Unfourtunately because of how django-oauth2-provider implements
+        # TODO: Unfortunately because of how django-oauth2-provider implements
         # scopes, we cannot check if `openid` is the first scope to be
         # requested, as required by OpenID Connect specification.
 
-        if provider.scope.check(constants.OPEN_ID_SCOPE, access_token.scope):
-            id_token = self.get_id_token(access_token)
-            extra_data['id_token'] = self.encode_id_token(id_token)
-            scope = provider.scope.to_int(*id_token.scopes)
+        if not provider.scope.check(constants.OPEN_ID_SCOPE, access_token.scope):
+            if response_type and 'id_token' in response_type.split():
+                # http://openid.net/specs/openid-connect-core-1_0.html#AuthRequest:
+                #   If the openid scope value is not present, the behavior is entirely unspecified.
+                #
+                # For our purposes, we'll treat this as a plain OAuth2 request and fall
+                # back to the default behavior, *unless* the 'id_token' scope is present,
+                # which is OIDC-specific, in which case we assume that the client has made
+                # an error.
+                raise OAuthError({'error': 'invalid_scope'})
+            return super(OIDCTokenMixin, self).access_token_response_data(access_token, response_type)
+
+        if response_type and 'code' not in response_type and 'id_token' not in response_type:
+            # http://openid.net/specs/openid-connect-core-1_0.html#ImplicitFlowAuth:
+            #   While OAuth 2.0 also defines the token Response Type value for the Implicit Flow,
+            #   OpenID Connect does not use this Response Type, since no ID Token would be returned.
+            #
+            # A request with the 'openid' scope that does not use either 'code' or
+            # 'id_token' response types is invalid under OIDC.
+            raise OAuthError({
+                u'error': u'invalid_request',
+                u'error_description': u'response_type "{}" is invalid when using scope "openid"'.format(response_type)
+            })
+
+        id_token = self.get_id_token(access_token)
+        extra_data['id_token'] = self.encode_id_token(id_token)
+        scope = provider.scope.to_int(*id_token.scopes)
 
         # Update the token scope, so it includes only authorized values.
         access_token.scope = scope
         access_token.save()
 
         # Get the main fields for OAuth2 response.
-        response_data = super(AccessTokenView, self).access_token_response_data(access_token)
+        response_data = super(OIDCTokenMixin, self).access_token_response_data(access_token, response_type)
+        if response_type and 'token' not in response_type.split():
+            del response_data['access_token']
+            del response_data['token_type']
 
         # Add any additional fields if OpenID Connect is requested. The order of
-        # the addition makes sures the OAuth2 values are not overrided.
+        # the addition makes sures the OAuth2 values are not overridden.
         response_data = dict(extra_data.items() + response_data.items())
 
         return response_data
@@ -153,6 +114,71 @@ class AccessTokenView(provider.oauth2.views.AccessTokenView):
         secret = id_token.access_token.client.client_secret
 
         return id_token.encode(secret)
+
+
+# pylint: disable=abstract-method
+class Authorize(OIDCTokenMixin, Authorize):
+    """
+    edX customized authorization view:
+      - Introduces trusted clients, which do not require user consent.
+    """
+    def get_request_form(self, client, data):
+        return AuthorizationRequestForm(data, client=client)
+
+    def get_authorization_form(self, _request, client, data, client_data):
+        # Check if the client is trusted. If so, bypass user
+        # authorization by filling the data in the form.
+        trusted = TrustedClient.objects.filter(client=client).exists()
+        if trusted:
+            scope_names = provider.scope.to_names(client_data['scope'])
+            data = {'authorize': [u'Authorize'], 'scope': scope_names}
+
+        form = AuthorizationForm(data)
+        return form
+
+
+# pylint: disable=abstract-method
+class AccessTokenView(AccessTokenView, OIDCTokenMixin):
+    """
+    Customized OAuth2 access token view.
+
+    Allows usage of email as main identifier when requesting a password grant.
+
+    Support the ID Token endpoint following the OpenID Connect specification:
+
+    - http://openid.net/specs/openid-connect-core-1_0.html#TokenEndpoint
+
+    By default it returns all the claims available to the scope requested,
+    and available to the claim handlers configured by `OAUTH_OIDC_ID_TOKEN_HANDLERS`
+
+    """
+
+    # Add custom authentication provider, to support email as username.
+    authentication = (AccessTokenView.authentication + (PublicPasswordBackend, ))
+
+    # The following grant overrides make sure the view uses our customized forms.
+
+    # pylint: disable=no-member
+    def get_authorization_code_grant(self, _request, data, client):
+        form = AuthorizationCodeGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        return form.cleaned_data.get('grant')
+
+    # pylint: disable=no-member
+    def get_refresh_token_grant(self, _request, data, client):
+        form = RefreshTokenGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        return form.cleaned_data.get('refresh_token')
+
+    # pylint: disable=no-member
+    def get_password_grant(self, _request, data, client):
+        # Use customized form to allow use of user email during authentication.
+        form = PasswordGrantForm(data, client=client)
+        if not form.is_valid():
+            raise OAuthError(form.errors)
+        return form.cleaned_data
 
 
 class ProtectedView(View):

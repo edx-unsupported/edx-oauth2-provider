@@ -49,7 +49,7 @@ class OAuth2TestCase(BaseTestCase):
     def setUp(self):
         super(OAuth2TestCase, self).setUp()
 
-    def login_and_authorize(self, scope=None, claims=None, trusted=False):
+    def login_and_authorize(self, response_type='code', scope=None, claims=None, trusted=False):
         """ Login into client using OAuth2 authorization flow. """
 
         self.set_trusted(self.auth_client, trusted)
@@ -58,21 +58,19 @@ class OAuth2TestCase(BaseTestCase):
         payload = {
             'client_id': self.auth_client.client_id,
             'redirect_uri': self.auth_client.redirect_uri,
-            'response_type': 'code',
+            'response_type': response_type,
             'state': 'some_state',
         }
         _add_values(payload, 'id_token', scope, claims)
-
         response = self.client.get(reverse('oauth2:capture'), payload)
         self.assertEqual(302, response.status_code)
 
         response = self.client.get(reverse('oauth2:authorize'), payload)
-
         return response
 
     def get_access_token_response(self, scope=None, claims=None):
         """ Get a new access token using the OAuth2 authorization flow. """
-        response = self.login_and_authorize(scope, claims, trusted=True)
+        response = self.login_and_authorize(scope=scope, claims=claims, trusted=True)
         self.assertEqual(302, response.status_code)
         self.assertEqual(reverse('oauth2:redirect'), normpath(response['Location']))
 
