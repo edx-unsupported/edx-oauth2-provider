@@ -92,7 +92,13 @@ class BasicIDTokenHandler(object):
 
     def claim_iss(self, data):
         """ Required issuer identifier. """
-        return settings.OAUTH_OIDC_ISSUER
+        # Default to issuer configured in settings
+        issuer = settings.OAUTH_OIDC_ISSUER
+        client = data['client']
+        if client.oidc_issuer:
+            # If the client has an issuer, use it instead
+            issuer = client.oidc_issuer.url
+        return issuer
 
     def claim_sub(self, data):
         """ Required subject identifier. """
