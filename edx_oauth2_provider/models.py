@@ -24,3 +24,16 @@ class TrustedClient(models.Model):
 
     class Meta(object):
         db_table = 'oauth2_provider_trustedclient'
+
+
+class OidcIssuer(models.Model):
+    """
+    The OIDC issuer for the related client. According to the OpenID connect
+    specification, the url of the OidcIssuer should use the `https` scheme,
+    host and optionally the port number and path.
+    """
+    client = models.ForeignKey(Client, related_name='oidc_issuer')
+    url = models.URLField()
+
+    class Meta(object):
+        db_table = 'oauth2_provider_oidc_issuer'
