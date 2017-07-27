@@ -5,11 +5,11 @@ For details on the format of the claim handlers, see
 :mod:`oauth2_provider.oicd.handlers`
 
 None: The functions in this module assume the `openid` scope is implied.
-
 """
+# pylint: disable=missing-docstring
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import provider.scope
-
 
 REQUIRED_SCOPES = ['openid']
 
@@ -177,13 +177,13 @@ def _validate_claim_values(name, value, ignore_errors):
     return results
 
 
-def _visit_handlers(handlers, visitor, preffix, suffixes):
+def _visit_handlers(handlers, visitor, prefix, suffixes):
     """ Use visitor partern to collect information from handlers """
 
     results = []
     for handler in handlers:
         for suffix in suffixes:
-            func = getattr(handler, '{}_{}'.format(preffix, suffix).lower(), None)
+            func = getattr(handler, '{}_{}'.format(prefix, suffix).lower(), None)
             if func:
                 results.append(visitor(suffix, func))
 
