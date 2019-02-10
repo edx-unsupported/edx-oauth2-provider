@@ -1,3 +1,6 @@
+# Personal venv
+venv
+
 # Python bytecode:
 *.py[co]
 
