@@ -1,0 +1,215 @@
+"""
+Default model implementations. Custom database or OAuth backends need to
+implement these models with fields and and methods to be compatible with the
+views in :attr:`provider.views`.
+"""
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+from django.utils.encoding import python_2_unicode_compatible
+
+from provider import constants
+from provider.constants import CLIENT_TYPES
+from provider.oauth2.managers import AccessTokenManager
+from provider.utils import get_token_expiry, serialize_instance, deserialize_instance
+from provider.utils import now, short_token, long_token, get_code_expiry
+
+AUTH_USER_MODEL = settings.AUTH_USER_MODEL
+
+
+@python_2_unicode_compatible
+class Client(models.Model):
+    """
+    Default client implementation.
+
+    Expected fields:
+
+    * :attr:`user`
+    * :attr:`name`
+    * :attr:`url`
+    * :attr:`redirect_url`
+    * :attr:`client_id`
+    * :attr:`client_secret`
+    * :attr:`client_type`
+
+    Clients are outlined in the :rfc:`2` and its subsections.
+    """
+
+    class Meta:
+        # In Django 1.7, this is required so that Django recognizes
+        # this model as part of "oauth2" instead of "provider.oauth2".
+        # See https://code.djangoproject.com/ticket/23348
+        app_label = "oauth2"
+
+    user = models.ForeignKey(AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='oauth2_client',
+                             blank=True, null=True)
+    name = models.CharField(max_length=255, blank=True)
+    url = models.URLField(help_text="Your application's URL.")
+    redirect_uri = models.URLField(help_text="Your application's callback URL")
+    client_id = models.CharField(max_length=255, default=short_token)
+    client_secret = models.CharField(max_length=255, default=long_token)
+    client_type = models.IntegerField(choices=CLIENT_TYPES)
+    logout_uri = models.URLField(help_text="Your application's logout URL", null=True, blank=True)
+
+    def __str__(self):
+        return self.redirect_uri
+
+    def get_default_token_expiry(self):
+        public = (self.client_type == 1)
+        return get_token_expiry(public)
+
+    def serialize(self):
+        return dict(user=serialize_instance(self.user),
+                    name=self.name,
+                    url=self.url,
+                    redirect_uri=self.redirect_uri,
+                    client_id=self.client_id,
+                    client_secret=self.client_secret,
+                    client_type=self.client_type,
+                    logout_uri=self.logout_uri)
+
+    @classmethod
+    def deserialize(cls, data):
+        if not data:
+            return None
+
+        kwargs = {}
+
+        # extract values that we care about
+        for field in cls._meta.fields:
+            name = field.name
+            val = data.get(field.name, None)
+
+            # handle relations
+            if val and field.remote_field:
+                val = deserialize_instance(field.remote_field.model, val)
+
+            kwargs[name] = val
+
+        return cls(**kwargs)
+
+
+@python_2_unicode_compatible
+class Grant(models.Model):
+    """
+    Default grant implementation. A grant is a code that can be swapped for an
+    access token. Grants have a limited lifetime as defined by
+    :attr:`provider.constants.EXPIRE_CODE_DELTA` and outlined in
+    :rfc:`4.1.2`
+
+    Expected fields:
+
+    * :attr:`user`
+    * :attr:`client` - :class:`Client`
+    * :attr:`code`
+    * :attr:`expires` - :attr:`datetime.datetime`
+    * :attr:`redirect_uri`
+    * :attr:`scope`
+    """
+
+    class Meta:
+        app_label = "oauth2"
+        index_together = ["client", "code", "expires"]
+
+    user = models.ForeignKey(AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dop_grant')
+    client = models.ForeignKey(Client, on_delete=models.CASCADE)
+    code = models.CharField(max_length=255, default=long_token)
+    nonce = models.CharField(max_length=255, blank=True, default='')
+    expires = models.DateTimeField(default=get_code_expiry)
+    redirect_uri = models.CharField(max_length=255, blank=True)
+    scope = models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.code
+
+
+@python_2_unicode_compatible
+class AccessToken(models.Model):
+    """
+    Default access token implementation. An access token is a time limited
+    token to access a user's resources.
+
+    Access tokens are outlined :rfc:`5`.
+
+    Expected fields:
+
+    * :attr:`user`
+    * :attr:`token`
+    * :attr:`client` - :class:`Client`
+    * :attr:`expires` - :attr:`datetime.datetime`
+    * :attr:`scope`
+
+    Expected methods:
+
+    * :meth:`get_expire_delta` - returns an integer representing seconds to
+        expiry
+    """
+
+    class Meta:
+        app_label = "oauth2"
+
+    user = models.ForeignKey(AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dop_access_token')
+    token = models.CharField(max_length=255, default=long_token, db_index=True)
+    client = models.ForeignKey(Client, on_delete=models.CASCADE)
+    expires = models.DateTimeField()
+    scope = models.IntegerField(default=constants.SCOPES[0][0],
+                                choices=constants.SCOPES)
+
+    objects = AccessTokenManager()
+
+    def __str__(self):
+        return self.token
+
+    def save(self, *args, **kwargs):
+        if not self.expires:
+            self.expires = self.client.get_default_token_expiry()
+        super(AccessToken, self).save(*args, **kwargs)
+
+    def get_expire_delta(self, reference=None):
+        """
+        Return the number of seconds until this token expires.
+        """
+        if reference is None:
+            reference = now()
+        expiration = self.expires
+
+        if timezone:
+            if timezone.is_aware(reference) and timezone.is_naive(expiration):
+                # MySQL doesn't support timezone for datetime fields
+                # so we assume that the date was stored in the UTC timezone
+                expiration = timezone.make_aware(expiration, timezone.utc)
+            elif timezone.is_naive(reference) and timezone.is_aware(expiration):
+                reference = timezone.make_aware(reference, timezone.utc)
+
+        timedelta = expiration - reference
+        return timedelta.days * 86400 + timedelta.seconds
+
+
+@python_2_unicode_compatible
+class RefreshToken(models.Model):
+    """
+    Default refresh token implementation. A refresh token can be swapped for a
+    new access token when said token expires.
+
+    Expected fields:
+
+    * :attr:`user`
+    * :attr:`token`
+    * :attr:`access_token` - :class:`AccessToken`
+    * :attr:`client` - :class:`Client`
+    * :attr:`expired` - ``boolean``
+    """
+
+    class Meta:
+        app_label = "oauth2"
+
+    user = models.ForeignKey(AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dop_refresh_token')
+    token = models.CharField(max_length=255, default=long_token)
+    access_token = models.OneToOneField(AccessToken, on_delete=models.CASCADE,
+                                        related_name='refresh_token')
+    client = models.ForeignKey(Client, on_delete=models.CASCADE)
+    expired = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.token
