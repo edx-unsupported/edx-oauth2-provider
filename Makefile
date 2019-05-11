@@ -29,8 +29,7 @@ requirements:
 	pip install --process-dependency-links -r test_requirements.txt
 
 test: clean ## run tests in the current virtualenv
-	coverage py.test
-	coverage report
+	py.test
 
 diff_cover: test
 	diff-cover coverage.xml
