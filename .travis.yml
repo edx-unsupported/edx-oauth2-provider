@@ -15,15 +15,16 @@ matrix:
   include:
     - python: 2.7
       env: TOXENV=quality
-  allow-failures:
+  allow_failures:
+    - python: 3.6
+    - python: 3.7
     - python: 2.7
       env: TOXENV=django20
-    - python:2.7
+    - python: 2.7
       env: TOXENV=django21
     - python: 2.7
       env: TOXENV=django22
-    - python: 3.6
-    - python: 3.7
+
 
 cache:
   - pip
